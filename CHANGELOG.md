@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `NativeTextViewWrapper.onTextMutation` reports exact, completed native edits
+  for embedders that maintain their own source authority or mirror edits into
+  another presentation.
+
 ### Performance
 - Scoped restyles inside a contiguous list parse and style only intersecting
   items instead of rebuilding the whole list block. Marker, indentation,

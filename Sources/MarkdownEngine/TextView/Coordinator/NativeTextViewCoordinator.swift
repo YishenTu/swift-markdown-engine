@@ -78,6 +78,7 @@ public final class NativeTextViewCoordinator: NSObject, NSTextViewDelegate {
     var layoutDelegate: MarkdownLayoutManagerDelegate?
     var onLinkClick: ((String) -> Void)?
     var onCaretRectChange: ((CGRect) -> Void)?
+    var onTextMutation: ((MarkdownTextMutation) -> Void)?
     /// Embedder hook to build the right-click menu (the engine ships none). Gets the
     /// default menu + current selection range, returns the menu to show.
     var onBuildContextMenu: ((NSMenu, NSRange) -> NSMenu)?
@@ -148,6 +149,9 @@ public final class NativeTextViewCoordinator: NSObject, NSTextViewDelegate {
     var wikiVerifyCounter: UInt = 0
 
     var pendingEditedRange: NSRange? = nil
+    /// Exact pre-edit descriptor paired with `pendingEditedRange`. It is
+    /// published only when one accepted proposal produces the change event.
+    var pendingTextMutation: MarkdownTextMutation?
     /// Proposed-edit cycles since the last completed textDidChange. Exactly 1
     /// means the hoisted editedRange/lengthDelta describe a single tracked
     /// edit and incremental fast paths may trust them.

@@ -77,12 +77,18 @@ extension NativeTextViewCoordinator {
     public func textDidChange(_ notification: Notification) {
         guard let tv = notification.object as? NSTextView else { return }
         PerfTrace.checkpoint("didIn")
+        let completedTextMutation = pendingEditCount == 1
+            ? pendingTextMutation
+            : nil
+        pendingTextMutation = nil
         // Typing means the reader is here, so an unlanded restore must not fire.
         pendingScrollRestoreDocumentId = nil
         // Before the early returns: the first keystroke must hide the placeholder.
         (tv as? NativeTextView)?.refreshPlaceholderVisibility()
         // Raw mode: display IS storage — sync the binding, skip the restyle.
         if configuration.rawSourceMode {
+            pendingEditCount = 0
+            pendingEditedRange = nil
             guard !tv.hasMarkedText() else { return }
             if tv.string != lastSyncedText {
                 let rawText = tv.string
@@ -95,6 +101,9 @@ extension NativeTextViewCoordinator {
                let scrollView = tv.enclosingScrollView {
                 bottomTextView.recalcOverscroll(for: scrollView, debugTag: "textDidChange")
                 (scrollView as? ClampedScrollView)?.clampToInsets()
+            }
+            if let completedTextMutation {
+                onTextMutation?(completedTextMutation)
             }
             return
         }
@@ -364,6 +373,9 @@ extension NativeTextViewCoordinator {
             }
         }
         previousActiveTokenIndices = activeTokenIndices
+        if let completedTextMutation {
+            onTextMutation?(completedTextMutation)
+        }
         PerfTrace.end()
     }
 
@@ -845,6 +857,10 @@ extension NativeTextViewCoordinator {
         // would otherwise leave the suppressed edit's descriptor behind, and the
         // wiki splice in textDidChange would corrupt the storage form from it.
         pendingEditedRange = NSRange(location: affectedCharRange.location, length: replacementString?.utf16.count ?? 0)
+        pendingTextMutation = MarkdownTextMutation(
+            range: affectedCharRange,
+            replacement: replacementString ?? ""
+        )
         pendingEditCount += 1
         // Pre-edit backtick window baseline for the incremental census.
         if affectedCharRange.location >= 0, NSMaxRange(affectedCharRange) <= preNS.length {
