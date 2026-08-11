@@ -16,6 +16,12 @@ import AppKit
 
 extension NativeTextViewCoordinator {
 
+    /// The complete leading syntax whose mutation can change list membership,
+    /// indentation, or the positional numbering of following ordered items.
+    private static let listStructurePrefixRegex = try! NSRegularExpression(
+        pattern: #"^[ \t]*(?:(?:\d+[.)])|[-•*+])(?:[ \t]+\[[ xX]\])?[ \t]+"#
+    )
+
     /// Supplies a per-document `UndoManager` to the text view.
     ///
     /// AppKit reuses one `NSTextView` across every open document, so the built-in
@@ -109,6 +115,13 @@ extension NativeTextViewCoordinator {
         let docString = tv.string
         let fullText = docString as NSString
         let fullLength = fullText.length
+        // NSTextView's undo machinery can mutate storage without replaying
+        // shouldChangeTextIn. Treat an in-flight undo/redo as structural when
+        // it intersects an ordered run below; this preserves numbering while
+        // ordinary content keystrokes retain their narrow paragraph scope.
+        let activeUndoManager = undoManagers[documentId ?? "__default__"]
+        let isUndoRedo = activeUndoManager?.isUndoing == true
+            || activeUndoManager?.isRedoing == true
         guard !tv.hasMarkedText() else { return }
         let safeLocation = min(rawSelRange.location, fullLength)
         let safeSelRange = NSRange(location: safeLocation, length: 0)
@@ -287,14 +300,14 @@ extension NativeTextViewCoordinator {
             currentActiveTokenIndices: activeTokenIndices,
             previousActiveTokenIndices: preEditActiveTokenIndices
         ))
-        // An ordered list numbers each item by its POSITION, so adding or
-        // removing an item (a line-break or indent edit) shifts every following
-        // number through the end of the run: restyle the whole forward run —
+        // An ordered list numbers each item by its POSITION, so changing its
+        // leading marker/indent or adding/removing an item can shift every
+        // following number through the end of the run: restyle forward —
         // list blocks joined by blank separators, stopping at the first content
         // block. Numbers ABOVE are unchanged and the styler's backward seed
         // feeds the count in, so forward-only from the edit is enough. A plain
         // content edit shifts no number and keeps the default paragraph scope.
-        let listStructureChanged = pendingListStructureEdit
+        let listStructureChanged = pendingListStructureEdit || isUndoRedo
         pendingListStructureEdit = false
         if listStructureChanged {
             let editBlocks = parsed.blocks
@@ -710,6 +723,63 @@ extension NativeTextViewCoordinator {
         return fences.contains { windowText.contains($0.fence) }
     }
 
+    /// Compare the touched line's list prefix before and after a proposed
+    /// single-line edit. Prefix changes widen the ordered run; content-only
+    /// edits remain paragraph-scoped. Doubt fails closed.
+    func editChangesListStructure(
+        in text: NSString,
+        range: NSRange,
+        replacement: String
+    ) -> Bool {
+        guard range.location != NSNotFound,
+              range.location >= 0,
+              range.length >= 0 else { return true }
+        let (rangeEnd, overflowed) = range.location.addingReportingOverflow(
+            range.length
+        )
+        guard !overflowed, rangeEnd <= text.length else { return true }
+        guard !replacement.utf16.contains(where: {
+            $0 == 0x0A || $0 == 0x0D
+        }) else { return true }
+
+        let line = text.lineRange(
+            for: NSRange(location: range.location, length: 0)
+        )
+        var bodyEnd = NSMaxRange(line)
+        while bodyEnd > line.location {
+            let character = text.character(at: bodyEnd - 1)
+            guard character == 0x0A || character == 0x0D else { break }
+            bodyEnd -= 1
+        }
+        guard range.location >= line.location,
+              rangeEnd <= bodyEnd else { return true }
+
+        let bodyRange = NSRange(
+            location: line.location,
+            length: bodyEnd - line.location
+        )
+        let before = text.substring(with: bodyRange)
+        let after = NSMutableString(string: before)
+        after.replaceCharacters(
+            in: NSRange(
+                location: range.location - line.location,
+                length: range.length
+            ),
+            with: replacement
+        )
+
+        func prefix(in candidate: String) -> String? {
+            let nsCandidate = candidate as NSString
+            guard let match = Self.listStructurePrefixRegex.firstMatch(
+                in: candidate,
+                range: NSRange(location: 0, length: nsCandidate.length)
+            ) else { return nil }
+            return nsCandidate.substring(with: match.range)
+        }
+
+        return prefix(in: before) != prefix(in: after as String)
+    }
+
     /// Backtick census in O(edit window): the greedy ``` count equals
     /// Σ floor(runLen/3) over maximal backtick runs, so an edit only changes
     /// the contribution of runs it touches. `previousBacktickCount` minus the
@@ -781,10 +851,9 @@ extension NativeTextViewCoordinator {
             pendingBacktickWindow = (affectedCharRange.location, affectedCharRange.length,
                 MarkdownDetection.backtickWindowCount(in: preNS, around: affectedCharRange))
             pendingExtFenceTouched = editWindowTouchesExtensionFence(in: preNS, around: affectedCharRange)
-            // An ordered item is added/removed only when the edit inserts or
-            // deletes a line break → every following number shifts. A programmatic
-            // sub-edit (e.g. the list-continuation re-insert) only OR-adds, so it
-            // can't clear the user keystroke's signal.
+            // A programmatic sub-edit (e.g. list continuation) only OR-adds to
+            // this signal, so it cannot clear the user keystroke's structural
+            // marker, indentation, or line-break change.
             let addsBreak = replacementString?.utf16.contains { $0 == 0x0A || $0 == 0x0D } ?? false
             let removesBreak = affectedCharRange.length > 0
                 && preNS.rangeOfCharacter(from: .newlines, options: [], range: affectedCharRange).location != NSNotFound
@@ -793,7 +862,13 @@ extension NativeTextViewCoordinator {
             let addsTab = replacementString?.utf16.contains { $0 == 0x09 } ?? false
             let removesTab = affectedCharRange.length > 0
                 && preNS.rangeOfCharacter(from: CharacterSet(charactersIn: "\t"), options: [], range: affectedCharRange).location != NSNotFound
+            let changesListPrefix = editChangesListStructure(
+                in: preNS,
+                range: affectedCharRange,
+                replacement: replacementString ?? ""
+            )
             let structural = addsBreak || removesBreak || addsTab || removesTab
+                || changesListPrefix
             pendingListStructureEdit = isProgrammaticEdit ? (pendingListStructureEdit || structural) : structural
         } else {
             pendingBacktickWindow = nil

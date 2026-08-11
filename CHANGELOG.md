@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+- Scoped restyles inside a contiguous list parse and style only intersecting
+  items instead of rebuilding the whole list block. Marker, indentation,
+  line-break, programmatic, and undo/redo edits still widen ordered-list runs
+  when downstream display numbers can change.
+
 ## [0.12.0] - 2026-08-10
 
 ### Added

@@ -132,6 +132,19 @@ struct OrderedListDisplayNumberingTests {
         #expect(overlays(style(text)).map(\.text) == ["2.", "3."])   // full pass agrees
     }
 
+    @Test("disjoint scopes inside one list reseed omitted items")
+    func disjointScopesInsideOneListReseedOmittedItems() {
+        let text = "1. one\n1. two\n1. three\n1. four\n"
+        let ns = text as NSString
+        let first = ns.lineRange(for: ns.range(of: "1. one"))
+        let fourth = ns.lineRange(for: ns.range(of: "1. four"))
+
+        let painted = overlays(style(text, scoped: [first, fourth]))
+
+        #expect(painted.map(\.loc) == [fourth.location])
+        #expect(painted.map(\.text) == ["4."])
+    }
+
     // MARK: Caret
 
     /// The caret parked at the line start is where every whole-line delete and
@@ -153,6 +166,90 @@ struct OrderedListDisplayNumberingTests {
     }
 
     // MARK: Coordinator wiring
+
+    @Test("ordered marker edits are classified as run-affecting")
+    func orderedMarkerEditIsRunAffecting() {
+        let (coordinator, tv) = makeEditor("3. a\n1. b\n1. c")
+        coordinator.pendingListStructureEdit = false
+
+        let accepted = coordinator.textView(
+            tv,
+            shouldChangeTextIn: NSRange(location: 0, length: 1),
+            replacementString: "5"
+        )
+
+        #expect(accepted)
+        #expect(coordinator.pendingListStructureEdit)
+    }
+
+    @Test("leading indentation edits are classified as run-affecting")
+    func leadingIndentEditIsRunAffecting() {
+        let (coordinator, tv) = makeEditor("1. a\n1. b\n1. c")
+        coordinator.pendingListStructureEdit = false
+
+        let accepted = coordinator.textView(
+            tv,
+            shouldChangeTextIn: NSRange(location: 5, length: 0),
+            replacementString: "  "
+        )
+
+        #expect(accepted)
+        #expect(coordinator.pendingListStructureEdit)
+    }
+
+    @Test("all leading list syntax transitions are run-affecting")
+    func leadingListSyntaxTransitionsAreRunAffecting() {
+        let cases: [(range: NSRange, replacement: String)] = [
+            (NSRange(location: 1, length: 1), ")"),
+            (NSRange(location: 0, length: 2), "-"),
+            (NSRange(location: 2, length: 1), ""),
+        ]
+
+        for testCase in cases {
+            let (coordinator, tv) = makeEditor("1. a\n1. b\n1. c")
+            coordinator.pendingListStructureEdit = false
+
+            let accepted = coordinator.textView(
+                tv,
+                shouldChangeTextIn: testCase.range,
+                replacementString: testCase.replacement
+            )
+
+            #expect(accepted)
+            #expect(coordinator.pendingListStructureEdit)
+        }
+    }
+
+    @Test("programmatic marker edits remain run-affecting")
+    func programmaticMarkerEditIsRunAffecting() {
+        let (coordinator, tv) = makeEditor("1. a\n1. b\n1. c")
+        coordinator.isProgrammaticEdit = true
+        coordinator.pendingListStructureEdit = false
+
+        let accepted = coordinator.textView(
+            tv,
+            shouldChangeTextIn: NSRange(location: 0, length: 1),
+            replacementString: "3"
+        )
+
+        #expect(accepted)
+        #expect(coordinator.pendingListStructureEdit)
+    }
+
+    @Test("list content edits stay paragraph-scoped")
+    func listContentEditIsNotRunAffecting() {
+        let (coordinator, tv) = makeEditor("1. a\n1. b\n1. c")
+        coordinator.pendingListStructureEdit = false
+
+        let accepted = coordinator.textView(
+            tv,
+            shouldChangeTextIn: NSRange(location: 8, length: 1),
+            replacementString: "B"
+        )
+
+        #expect(accepted)
+        #expect(!coordinator.pendingListStructureEdit)
+    }
 
     /// The load-bearing half: the styler's reveal is caret-dependent, so a
     /// caret move across the marker has to trigger a restyle. Nothing else
@@ -180,6 +277,63 @@ struct OrderedListDisplayNumberingTests {
 
         #expect(tv.string == "1. a\n1. bx\n1. c")
         #expect(overlays(in: tv).map(\.text) == ["2.", "3."])
+    }
+
+    @Test("editing the run's starting number restyles following items")
+    func editingRunStartNumberRestylesFollowingItems() {
+        let (_, tv) = makeEditor("3. a\n1. b\n1. c")
+        #expect(overlays(in: tv).map(\.text) == ["4.", "5."])
+
+        tv.insertText("5", replacementRange: NSRange(location: 0, length: 1))
+
+        #expect(tv.string == "5. a\n1. b\n1. c")
+        #expect(overlays(in: tv).map(\.text) == ["6.", "7."])
+    }
+
+    @Test("undo and redo of a marker edit restyle following items")
+    func undoRedoMarkerEditRestylesFollowingItems() throws {
+        let (coordinator, tv) = makeEditor("3. a\n1. b\n1. c")
+        tv.allowsUndo = true
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = tv
+        window.makeFirstResponder(tv)
+        defer { window.contentView = nil }
+
+        let undoManager = try #require(coordinator.undoManager(for: tv))
+        tv.insertText("5", replacementRange: NSRange(location: 0, length: 1))
+        #expect(overlays(in: tv).map(\.text) == ["6.", "7."])
+        #expect(tv.undoManager === undoManager)
+
+        // AppKit's private text undo action bypasses delegate notifications in
+        // a headless test process. Register an equivalent replacement action
+        // so undo/redo still runs through the public text-view delegate path.
+        undoManager.removeAllActions()
+        undoManager.groupsByEvent = false
+        var registerReplacement: ((String, String) -> Void)!
+        registerReplacement = { replacement, inverse in
+            undoManager.registerUndo(withTarget: tv) { textView in
+                undoManager.disableUndoRegistration()
+                textView.insertText(replacement, replacementRange: NSRange(location: 0, length: 1))
+                undoManager.enableUndoRegistration()
+                registerReplacement(inverse, replacement)
+            }
+        }
+        undoManager.beginUndoGrouping()
+        registerReplacement("3", "5")
+        undoManager.endUndoGrouping()
+
+        undoManager.undo()
+        #expect(tv.string == "3. a\n1. b\n1. c")
+        #expect(overlays(in: tv).map(\.text) == ["4.", "5."])
+
+        undoManager.redo()
+        #expect(tv.string == "5. a\n1. b\n1. c")
+        #expect(overlays(in: tv).map(\.text) == ["6.", "7."])
     }
 
     /// End-to-end repro of the shipped-looking bug: delete the middle item and

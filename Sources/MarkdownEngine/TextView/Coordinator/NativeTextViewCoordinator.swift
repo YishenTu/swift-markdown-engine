@@ -118,9 +118,9 @@ public final class NativeTextViewCoordinator: NSObject, NSTextViewDelegate {
     /// extension block fence — captured in shouldChangeTextIn so a DELETED
     /// fence still forces the full restyle in textDidChange.
     var pendingExtFenceTouched = false
-    /// Set in shouldChangeTextIn when an edit adds/removes a line break (an
-    /// ordered-list item was inserted/removed → every following number shifts);
-    /// consumed once in textDidChange to restyle the whole ordered run.
+    /// Set in shouldChangeTextIn when an edit changes list-leading syntax or a
+    /// line break, which can shift every following ordered number; consumed
+    /// once in textDidChange to restyle the affected ordered run.
     var pendingListStructureEdit = false
     /// Set when the storage mutated without the census bookkeeping seeing it
     /// (IME composition) — forces the next census back to a full scan.
@@ -485,4 +485,3 @@ extension NSTextView {
         return boundingRect
     }
 }
-

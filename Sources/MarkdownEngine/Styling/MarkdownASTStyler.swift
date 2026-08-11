@@ -280,7 +280,13 @@ enum MarkdownASTStyler {
             contiguousEnd = NSMaxRange(block.range)
             switch block {
             case .list(_, let items):
+                var previousItemEnd: Int?
                 for item in items {
+                    if let previousItemEnd,
+                       item.range.location > previousItemEnd {
+                        counters = [:]
+                        needsSeed = true
+                    }
                     if item.ordered, let literal = item.number {
                         if needsSeed {
                             counters = seedOrderedCounters(above: item.marker.location, in: ns)
@@ -293,6 +299,7 @@ enum MarkdownASTStyler {
                         counters[item.indent] = nil
                     }
                     for key in counters.keys where key > item.indent { counters[key] = nil }
+                    previousItemEnd = NSMaxRange(item.range)
                 }
             case .blank:
                 break                     // blank lines keep the count (spacing, not a reset)
