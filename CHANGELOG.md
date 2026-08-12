@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   highlight and collided with the number drawn over it. The marker's
   caret-crossing restyle signal went with the reveal.
 
+### Fixed
+- Rendered tables now follow every live editor-width change, including
+  fractional widths, and settle at the final width when window resizing ends.
+
 ### Performance
 - Scoped restyles inside a contiguous list parse and style only intersecting
   items instead of rebuilding the whole list block. Marker, indentation,
