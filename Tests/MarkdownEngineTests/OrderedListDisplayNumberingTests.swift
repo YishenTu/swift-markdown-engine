@@ -348,4 +348,43 @@ struct OrderedListDisplayNumberingTests {
         #expect(tv.string == "1. a\n1. c")
         #expect(overlays(in: tv).map(\.text) == ["2."])
     }
+
+    // MARK: Scoped item runs
+
+    /// A caret move restyles the paragraph it entered AND the one it left. Coming
+    /// from the content block directly above the list, the scoped list node starts
+    /// at a LATER item — with no item above it inside that node to count from, and
+    /// with the preceding block having just cleared the seed flag. The number has
+    /// to come back from the source, not from the item's own literal digits.
+    @Test("clicking from the block above into a later item keeps the number")
+    func clickFromBlockAboveKeepsTheNumber() {
+        for above in ["# H", "> quote", "**bold** text"] {
+            let (_, tv) = makeEditor("\(above)\n1. a\n1. b\n1. c\n")
+            #expect(overlays(in: tv).map(\.text) == ["2.", "3."])
+
+            let content = (tv.string as NSString).range(of: "c").location
+            tv.setSelectedRange(NSRange(location: 1, length: 0))            // into the block above
+            tv.setSelectedRange(NSRange(location: content, length: 0))      // into item 3's content
+
+            #expect(overlays(in: tv).map(\.text) == ["2.", "3."], "block above: \(above)")
+        }
+    }
+
+    /// The mirror image: a scope that keeps only the HEAD of a list block leaves
+    /// its tail unbuilt. Those dropped lines are content, not the blank-line
+    /// spacing of a loose list, so the next block must re-seed instead of
+    /// continuing a count that stopped early.
+    @Test("a scope truncating a list's tail does not miscount the next block")
+    func truncatedTailDoesNotMiscountTheNextBlock() {
+        let (_, tv) = makeEditor("1. one\n1. two\n\n1. three\n1. four\n")
+        #expect(overlays(in: tv).map(\.text) == ["2.", "3.", "4."])
+
+        // Off the digits of the second block's first item — the caret move that
+        // forces the restyle — into the first block's first item, leaving that
+        // block's remaining items outside the scope.
+        tv.setSelectedRange(NSRange(location: 15, length: 0))
+        tv.setSelectedRange(NSRange(location: 2, length: 0))
+
+        #expect(overlays(in: tv).map(\.text) == ["2.", "3.", "4."])
+    }
 }

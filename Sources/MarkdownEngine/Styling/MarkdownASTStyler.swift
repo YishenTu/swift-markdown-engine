@@ -279,8 +279,12 @@ enum MarkdownASTStyler {
             }
             contiguousEnd = NSMaxRange(block.range)
             switch block {
-            case .list(_, let items):
-                var previousItemEnd: Int?
+            case .list(let listRange, let items):
+                // A scoped node carries only the items the scope reached, so the
+                // hole check has to bound BOTH ends of the item run against the
+                // block, not just the space between two materialized items: seeded
+                // with the block's start here, closed against its end below.
+                var previousItemEnd: Int? = listRange.location
                 for item in items {
                     if let previousItemEnd,
                        item.range.location > previousItemEnd {
@@ -300,6 +304,15 @@ enum MarkdownASTStyler {
                     }
                     for key in counters.keys where key > item.indent { counters[key] = nil }
                     previousItemEnd = NSMaxRange(item.range)
+                }
+                // Items the scope dropped from the TAIL are not "already counted".
+                // Leaving contiguousEnd at the block's end hides them, so the next
+                // block sees only the blank separator, reads it as loose-list
+                // spacing, and carries a short count into a fresh run. Ending the
+                // stretch at the last materialized item turns them back into the
+                // content hole they are.
+                if let previousItemEnd, previousItemEnd < NSMaxRange(listRange) {
+                    contiguousEnd = previousItemEnd
                 }
             case .blank:
                 break                     // blank lines keep the count (spacing, not a reset)

@@ -857,10 +857,13 @@ extension NativeTextViewCoordinator {
         // would otherwise leave the suppressed edit's descriptor behind, and the
         // wiki splice in textDidChange would corrupt the storage form from it.
         pendingEditedRange = NSRange(location: affectedCharRange.location, length: replacementString?.utf16.count ?? 0)
-        pendingTextMutation = MarkdownTextMutation(
-            range: affectedCharRange,
-            replacement: replacementString ?? ""
-        )
+        // A nil replacement means AppKit is changing ATTRIBUTES over that range,
+        // not text (data detection linkifying a phone number, Format > Font).
+        // Coercing it to "" would publish "this range was deleted" to a listener
+        // that mirrors edits — so report nothing for a change that moves no text.
+        pendingTextMutation = replacementString.map {
+            MarkdownTextMutation(range: affectedCharRange, replacement: $0)
+        }
         pendingEditCount += 1
         // Pre-edit backtick window baseline for the incremental census.
         if affectedCharRange.location >= 0, NSMaxRange(affectedCharRange) <= preNS.length {

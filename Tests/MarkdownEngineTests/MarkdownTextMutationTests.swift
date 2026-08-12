@@ -82,4 +82,22 @@ struct MarkdownTextMutationTests {
         )
         #expect(received.isEmpty)
     }
+
+    /// AppKit proposes attribute-only changes with a nil replacement string —
+    /// data detection linkifying a phone number, Format > Font. No text moves, so
+    /// a listener mirroring these must not be told the range was replaced.
+    @Test("an attribute-only change emits no mutation")
+    func attributeOnlyChangeEmitsNoMutation() {
+        var received: [MarkdownTextMutation] = []
+        let text = "call 555 1234 now"
+        let textView = makeEditor(text) { received.append($0) }
+
+        let affected = NSRange(location: 5, length: 8)   // "555 1234"
+        #expect(textView.shouldChangeText(in: affected, replacementString: nil))
+        textView.textStorage?.addAttribute(.link, value: URL(string: "tel:5551234")!, range: affected)
+        textView.didChangeText()
+
+        #expect(textView.string == text)
+        #expect(received.isEmpty)
+    }
 }
