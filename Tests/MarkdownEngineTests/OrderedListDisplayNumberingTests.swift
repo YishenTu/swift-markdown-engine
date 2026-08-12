@@ -10,8 +10,9 @@
 //  * the block array a SCOPED restyle sees is not the document — the text
 //    between two scoped regions is missing, so a run can look continuous when
 //    prose actually ended it;
-//  * the overlay is caret-aware, so the coordinator has to restyle when the
-//    caret crosses a marker — no other signal covers ordered markers.
+//  * unlike every other markdown construct, the overlay does NOT step aside for
+//    the caret or a selection — the source digit is positional, not authored,
+//    and revealing it renamed the item the reader was pointing at.
 //
 
 import AppKit
@@ -158,11 +159,30 @@ struct OrderedListDisplayNumberingTests {
         #expect(painted.first?.loc == 5)
     }
 
-    @Test("caret on the digits reveals the raw marker")
-    func caretOnTheDigitsRevealsTheRawMarker() {
-        #expect(overlays(style("1. a\n1. b", caret: 6)).isEmpty)   // between `1` and `.`
-        #expect(overlays(style("1. a\n1. b", caret: 7)).isEmpty)   // the space after `1.`
-        #expect(overlays(style("1. a\n1. b", caret: 8)).count == 1) // content: overlay is back
+    /// The source digit is not something the reader authored — it is positional,
+    /// and in a run written `1./1./1.` every item's source reads `1.`. Revealing
+    /// it under the caret meant a plain click inside the marker flipped the
+    /// number back to `1.`, so the caret leaves the painted number alone.
+    @Test("caret on the digits keeps the display number")
+    func caretOnTheDigitsKeepsTheDisplayNumber() {
+        #expect(overlays(style("1. a\n1. b", caret: 6)).map(\.text) == ["2."])   // between `1` and `.`
+        #expect(overlays(style("1. a\n1. b", caret: 7)).map(\.text) == ["2."])   // the space after `1.`
+        #expect(overlays(style("1. a\n1. b", caret: 8)).map(\.text) == ["2."])   // content
+    }
+
+    /// Nor does a selection: ⌘A used to swap every marker back to its source
+    /// digit, so a whole list read one lower than it renders while selected.
+    @Test("a selection over the marker keeps the display number")
+    func selectionOverTheMarkerKeepsTheDisplayNumber() {
+        let text = "1. a\n1. b"
+        for selection in [NSRange(location: 5, length: 3),                  // just the marker
+                          NSRange(location: 0, length: (text as NSString).length)] {   // ⌘A
+            let painted = MarkdownASTStyler.styleAttributes(
+                text: text, fontName: fontName, fontSize: fontSize,
+                caretLocation: -1, selection: selection
+            )
+            #expect(overlays(painted).map(\.text) == ["2."], "selection \(selection)")
+        }
     }
 
     // MARK: Coordinator wiring
@@ -251,18 +271,17 @@ struct OrderedListDisplayNumberingTests {
         #expect(!coordinator.pendingListStructureEdit)
     }
 
-    /// The load-bearing half: the styler's reveal is caret-dependent, so a
-    /// caret move across the marker has to trigger a restyle. Nothing else
-    /// signals it (markers aren't tokens, the bullet regex has no digits).
-    @Test("caret leaving the marker restyles the line")
-    func caretLeavingTheMarkerRestylesTheLine() {
+    /// The paint is caret-independent now, so moving in and out of the marker
+    /// must leave the rendered number untouched — including the position every
+    /// whole-line delete and line-join parks the caret at.
+    @Test("moving the caret through the marker never changes the number")
+    func caretThroughTheMarkerKeepsTheNumber() {
         let (_, tv) = makeEditor("1. a\n1. b")
 
-        tv.setSelectedRange(NSRange(location: 6, length: 0))    // inside the digits
-        #expect(overlays(in: tv).isEmpty)
-
-        tv.setSelectedRange(NSRange(location: 2, length: 0))    // away, onto line 1
-        #expect(overlays(in: tv).map(\.text) == ["2."])
+        for caret in [5, 6, 7, 8, 2] {
+            tv.setSelectedRange(NSRange(location: caret, length: 0))
+            #expect(overlays(in: tv).map(\.text) == ["2."], "caret \(caret)")
+        }
     }
 
     /// A content keystroke shifts no number, so it keeps the default paragraph

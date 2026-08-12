@@ -12,6 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for embedders that maintain their own source authority or mirror edits into
   another presentation.
 
+### Changed
+- An ordered list's painted number no longer reverts to the source digit under
+  the caret or a selection. The number is positional, so in a run written
+  `1./1./1.` a click inside a marker — or a select-all — flipped every number
+  below an insertion back to whatever the file happens to say. The source marker
+  is hidden by size now, like every other marker the engine hides: a selection
+  repaints selected glyphs opaque, so a colour-hidden marker came back under the
+  highlight and collided with the number drawn over it. The marker's
+  caret-crossing restyle signal went with the reveal.
+
 ### Performance
 - Scoped restyles inside a contiguous list parse and style only intersecting
   items instead of rebuilding the whole list block. Marker, indentation,

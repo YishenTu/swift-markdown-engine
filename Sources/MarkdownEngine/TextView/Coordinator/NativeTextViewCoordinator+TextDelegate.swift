@@ -531,18 +531,9 @@ extension NativeTextViewCoordinator {
         let currentBulletSyntax = MarkdownStyler.bulletSyntaxRange(at: selLoc, in: docText)
         let bulletSyntaxChanged = prevBulletSyntax?.location != currentBulletSyntax?.location
             || prevBulletSyntax?.length != currentBulletSyntax?.length
-        // Ordered markers: the styler paints a POSITIONAL number over the source
-        // digits and reveals the raw digits while the caret edits them. Nothing
-        // else notices that crossing — markers aren't tokens and
-        // `bulletListRegex` carries no digits — so without this the line keeps
-        // whatever was painted last (raw `10.` stuck after editing a digit, or
-        // an overlay still asserting a number the run no longer has).
-        let prevOrderedSyntax = previousCaretLocation.flatMap {
-            MarkdownStyler.orderedSyntaxRange(at: $0, in: docText)
-        }
-        let currentOrderedSyntax = MarkdownStyler.orderedSyntaxRange(at: selLoc, in: docText)
-        let orderedSyntaxChanged = prevOrderedSyntax?.location != currentOrderedSyntax?.location
-            || prevOrderedSyntax?.length != currentOrderedSyntax?.length
+        // Ordered markers need no caret signal: their painted number does not
+        // depend on where the caret is. A SELECTION over one still reverts it to
+        // raw digits — that is the reveal-syntax span below, not a crossing.
         // Task syntax also reveals while a SELECTION sweeps it (styler is
         // selection-aware), but none of the caret-based signals above fire
         // when only the selection SPAN changes (shift-extend keeps the
@@ -555,10 +546,10 @@ extension NativeTextViewCoordinator {
             let span = nsText.paragraphRange(for: clamped)
             for needle in ["- [", "* [", "+ ["]
             where nsText.range(of: needle, options: [], range: span).location != NSNotFound { return true }
-            // An ordered marker reveals its raw digits under a selection too, and
-            // its slot is kerned to the DISPLAY width — without a restyle the raw
-            // digits would draw into a slot sized for a different number.
-            return MarkdownStyler.orderedListRegex.firstMatch(in: docText, options: [], range: span) != nil
+            // Ordered markers are NOT in here: their painted number no longer
+            // depends on the selection, so a selection sweeping one has nothing
+            // to repaint.
+            return false
         }
         let selectionSpanChanged = previousSelectedRange != selRange
             && ((previousSelectedRange?.length ?? 0) > 0 || selRange.length > 0)
@@ -570,7 +561,7 @@ extension NativeTextViewCoordinator {
         } else if isDragSelecting {
             needsRestyleAfterDrag = true
         } else if tokensChanged || taskSyntaxChanged || hrLineChanged || bulletSyntaxChanged
-                    || orderedSyntaxChanged || selectionSpanChanged || needsRestyleAfterDrag {
+                    || selectionSpanChanged || needsRestyleAfterDrag {
             needsRestyleAfterDrag = false
             // Candidates are built ONLY when a restyle actually runs — this
             // used to happen unconditionally on every selection change,
