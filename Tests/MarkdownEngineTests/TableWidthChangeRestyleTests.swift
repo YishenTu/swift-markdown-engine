@@ -78,7 +78,8 @@ struct TableWidthChangeRestyleTests {
         init(
             source requestedSource: String? = nil,
             horizontalTextInset: CGFloat = 0,
-            readingWidth: CGFloat? = nil
+            readingWidth: CGFloat? = nil,
+            rendersTablesDuringLiveResize: Bool = true
         ) throws {
             _ = NSApplication.shared
             let source = requestedSource ?? TableWidthChangeRestyleTests.wrappingTable
@@ -100,6 +101,7 @@ struct TableWidthChangeRestyleTests {
                 vertical: 0
             )
             configuration.readingWidth = readingWidth
+            configuration.rendersTablesDuringLiveResize = rendersTablesDuringLiveResize
             if let readingWidth {
                 textContainer.widthTracksTextView = false
                 textContainer.size = NSSize(
@@ -493,6 +495,70 @@ struct TableWidthChangeRestyleTests {
         )
 
         #expect(MarkdownStyler.effectiveContainerWidth(for: context) == 500)
+    }
+
+    @Test("Deferred tables retain their images during dragging and settle on release")
+    func deferredTablesSettleOnRelease() throws {
+        let harness = try Harness(
+            source: Self.manyTables,
+            rendersTablesDuringLiveResize: false
+        )
+        defer { harness.close() }
+        let scrollView = try #require(harness.textView.enclosingScrollView)
+        let initial = Harness.renderedTables(in: harness.textView)
+        let source = harness.textView.string
+        let selection = harness.textView.selectedRange()
+        scrollView.viewWillStartLiveResize()
+        for width in [820.0, 700, 580] {
+            harness.resizeWindow(to: width, display: false)
+            Harness.drain(mode: .eventTracking, duration: 0.01)
+            let current = Harness.renderedTables(in: harness.textView)
+            for (range, table) in initial {
+                #expect(current[range]?.image === table.image)
+            }
+        }
+        scrollView.viewDidEndLiveResize()
+        let settled = Harness.renderedTables(in: harness.textView)
+        for (range, table) in initial {
+            let result = try #require(settled[range])
+            #expect(result.image !== table.image)
+            #expect(abs(result.bounds.width - 579) <= 1)
+        }
+        #expect(!harness.textView.pendingTableWidthChangeUpdate)
+        #expect(harness.textView.string == source)
+        #expect(harness.textView.selectedRange() == selection)
+    }
+
+    @Test("A queued ordinary resize cannot render deferred tables during dragging")
+    func queuedResizeDefersUntilRelease() throws {
+        let harness = try Harness(rendersTablesDuringLiveResize: false)
+        defer { harness.close() }
+        let initial = try #require(Harness.renderedTable(in: harness.textView))
+        harness.resizeWindow(to: 820, display: false)
+        let scrollView = try #require(harness.textView.enclosingScrollView)
+        scrollView.viewWillStartLiveResize()
+        Harness.drain(mode: .eventTracking, duration: 0.01)
+        #expect(Harness.renderedTable(in: harness.textView)?.image === initial.image)
+        harness.resizeWindow(to: 580, display: false)
+        scrollView.viewDidEndLiveResize()
+        let settled = try #require(Harness.renderedTable(in: harness.textView))
+        #expect(abs(settled.bounds.width - 579) <= 1)
+        #expect(!harness.textView.pendingTableWidthChangeUpdate)
+    }
+
+    @Test("Deferred tables consume a late final hosting width synchronously")
+    func deferredTablesConsumeLateHostingWidth() throws {
+        let harness = try Harness(rendersTablesDuringLiveResize: false)
+        defer { harness.close() }
+        let scrollView = try #require(harness.textView.enclosingScrollView)
+        scrollView.viewWillStartLiveResize()
+        harness.resizeWindow(to: 580, display: false)
+        try harness.resizeDocumentContainer(to: 900)
+        scrollView.viewDidEndLiveResize()
+        try harness.resizeDocumentContainer(to: 580)
+        let settled = try #require(Harness.renderedTable(in: harness.textView))
+        #expect(abs(settled.bounds.width - 579) <= 1)
+        #expect(!harness.textView.pendingTableWidthChangeUpdate)
     }
 
     @Test("Live window resize applies the table width before layout returns")

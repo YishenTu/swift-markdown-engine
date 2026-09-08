@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `rendersTablesDuringLiveResize` lets embedders defer table reflow until resize ends while preserving synchronous final-width updates.
 - `NativeTextViewWrapper.onTextMutation` reports exact, completed native edits
   for embedders that maintain their own source authority or mirror edits into
   another presentation.

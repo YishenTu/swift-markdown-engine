@@ -131,8 +131,8 @@ final class ClampedScrollView: NSScrollView {
 
     override func viewDidEndLiveResize() {
         super.viewDidEndLiveResize()
-        nativeTextView?.flushPendingTableWidthChangeUpdate()
         isLiveResizeActive = false
+        nativeTextView?.flushPendingTableWidthChangeUpdate()
         // A lagging SwiftUI document view is observable as a width mismatch.
         // Keep synchronous table rendering armed until that concrete geometry
         // propagation is consumed; never guess its delivery time with a timer.

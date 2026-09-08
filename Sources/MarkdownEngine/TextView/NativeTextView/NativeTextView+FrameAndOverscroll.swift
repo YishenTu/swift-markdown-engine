@@ -276,7 +276,9 @@ extension NativeTextView {
         }
 
         if widthChanged {
-            if let clampedScrollView = scrollView as? ClampedScrollView,
+            if defersTableWidthChangeUpdate {
+                pendingTableWidthChangeUpdate = true
+            } else if let clampedScrollView = scrollView as? ClampedScrollView,
                clampedScrollView.requiresSynchronousTableWidthUpdate {
                 // A physical AppKit resize may remain inside its nested event
                 // tracking loop until mouse-up. Deferred blocks are therefore
@@ -314,10 +316,15 @@ extension NativeTextView {
         }
     }
 
+    private var defersTableWidthChangeUpdate: Bool {
+        !configuration.rendersTablesDuringLiveResize
+            && (enclosingScrollView as? ClampedScrollView)?.isLiveResizeActive == true
+    }
+
     /// Applies the latest width immediately. The scroll view calls this when a
     /// live resize ends so mouse-up cannot leave a scheduled final-width tail.
     func flushPendingTableWidthChangeUpdate() {
-        guard pendingTableWidthChangeUpdate else { return }
+        guard pendingTableWidthChangeUpdate, !defersTableWidthChangeUpdate else { return }
         pendingTableWidthChangeUpdate = false
         performTableWidthChangeUpdate()
     }
