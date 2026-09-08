@@ -437,6 +437,20 @@ extension MarkdownStyler {
         return true
     }
 
+    /// Per-character kern that collapses a hidden run to zero width.
+    ///
+    /// `.kern` is applied to EVERY character in the range, so a run of `n`
+    /// characters ends up `width + n * kern` wide — feeding it the whole run's
+    /// width made a long run `(n - 1)` widths too NEGATIVE. AppKit clamps most
+    /// such lines to zero, but a line holding a composed character sequence
+    /// (e.g. `z` + U+0304) instead laid out at x = +1783 with width -1783,
+    /// which poisoned `usageBoundsForTextContainer` for the whole document
+    /// (measured -1778…695 instead of 5…695 on a 14-line table).
+    static func hiddenRunKern(_ text: String, font: NSFont) -> CGFloat {
+        let count = max(1, (text as NSString).length)
+        return HeadingHelpers.textWidth(text, font: font) / CGFloat(count)
+    }
+
     /// Shared body for collapsed-source modes; hides raw source, plants image on anchor.
     private static func emitCollapsedAttrs(
         token: MarkdownToken,
@@ -488,7 +502,7 @@ extension MarkdownStyler {
             attrs.append((leadingRange, [
                 .foregroundColor: NSColor.clear,
                 .font: ctx.latexMarkerFont,
-                .kern: -HeadingHelpers.textWidth(leadingText, font: ctx.latexMarkerFont)
+                .kern: -hiddenRunKern(leadingText, font: ctx.latexMarkerFont)
             ]))
         }
 
@@ -513,7 +527,7 @@ extension MarkdownStyler {
             attrs.append((trailingRange, [
                 .foregroundColor: NSColor.clear,
                 .font: ctx.latexMarkerFont,
-                .kern: -HeadingHelpers.textWidth(trailingText, font: ctx.latexMarkerFont)
+                .kern: -hiddenRunKern(trailingText, font: ctx.latexMarkerFont)
             ]))
         }
 
@@ -524,7 +538,7 @@ extension MarkdownStyler {
             attrs.append((markerRange, [
                 .foregroundColor: NSColor.clear,
                 .font: ctx.latexMarkerFont,
-                .kern: -HeadingHelpers.textWidth(markerText, font: ctx.latexMarkerFont)
+                .kern: -hiddenRunKern(markerText, font: ctx.latexMarkerFont)
             ]))
         }
 
@@ -535,7 +549,7 @@ extension MarkdownStyler {
             attrs.append((preTokenRange, [
                 .foregroundColor: NSColor.clear,
                 .font: ctx.latexMarkerFont,
-                .kern: -HeadingHelpers.textWidth(preTokenText, font: ctx.latexMarkerFont)
+                .kern: -hiddenRunKern(preTokenText, font: ctx.latexMarkerFont)
             ]))
         }
     }
